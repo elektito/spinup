@@ -83,7 +83,7 @@ def main():
       <devices>
         <disk type='file' device='disk'>
           <driver name='qemu' type='qcow2'/>
-          <source file='/home/mostafa/source/spinup/disk.img'/>
+          <source file='{disk_image}'/>
           <backingStore/>
           <target dev='vda' bus='virtio'/>
           <alias name='virtio-disk0'/>
@@ -118,7 +118,8 @@ def main():
     '''
 
     config_disk = create_cloudconfig_disk()
-    xml = xml.format(config_disk=config_disk)
+    disk_image = os.path.abspath('disk.img')
+    xml = xml.format(config_disk=config_disk, disk_image=disk_image)
 
     domain = conn.defineXML(xml)
     domain.create()
