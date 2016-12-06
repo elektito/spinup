@@ -1,2 +1,1 @@
 libvirt-python==2.4.0
-PyYAML==3.12

@@ -3,9 +3,8 @@
 import os
 import sys
 import subprocess
-import yaml
 import libvirt
-from tempfile import NamedTemporaryFile
+from tempfile import mkdtemp
 
 def run_cmd(cmd):
     if isinstance(cmd, str):
@@ -19,35 +18,47 @@ def create_cloudconfig_disk():
     with open(os.path.expanduser('~/.ssh/id_rsa.pub')) as f:
         public_key = f.read()
 
+    instance_id = 'foo'
+    hostname = 'foo'
+
     public_key = public_key.strip()
     public_key = public_key.strip()[public_key.index(' ') + 1:]
+    public_key = public_key.strip()[:public_key.index(' ')]
 
-    user_data = {}
-    meta_data = {
-        'instance-id': 'foo',
-        'loacl-hostname': 'foo',
-        'public-keys': {
-            'ssh-rsa': public_key,
-        },
-    }
+    meta_data = '''
+instance-id: "{instance_id}",
+local-hostname: "{hostname}"
+    '''.format(instance_id=instance_id, hostname=hostname)
+
+    user_data = '''#cloud-config
+
+ssh_authorized_keys:
+ - "ssh-rsa {public_key} ubuntu@{hostname}"
+    '''.format(public_key=public_key, hostname=hostname)
 
     config_iso = '.config.iso'
+    tmpdir = mkdtemp()
+    meta_data_file = os.path.join(tmpdir, 'meta-data')
+    user_data_file = os.path.join(tmpdir, 'user-data')
 
-    with NamedTemporaryFile(mode='w', delete=False) as f:
-        yaml.dump(meta_data, f)
+    with open(meta_data_file, 'w') as f:
+        f.write(meta_data)
         meta_data_file = f.name
 
-    with NamedTemporaryFile(mode='w', delete=False) as f:
-        yaml.dump(user_data, f)
+    with open(user_data_file, 'w') as f:
+        f.write(user_data)
         user_data_file = f.name
 
-    #run_cmd('genisoimage -o {} -V cidata -r -J {} {}'.format(
-    #    config_iso, user_data_file, meta_data_file))
-    run_cmd('cloud-localds {} {} {}'.format(
+    try:
+        os.unlink(config_iso)
+    except FileNotFoundError:
+        pass
+    run_cmd('genisoimage -o {} -V cidata -r -J {} {}'.format(
         config_iso, user_data_file, meta_data_file))
 
     os.unlink(meta_data_file)
     os.unlink(user_data_file)
+    os.rmdir(tmpdir)
 
     return os.path.abspath(config_iso)
 
@@ -72,7 +83,7 @@ def main():
       <devices>
         <disk type='file' device='disk'>
           <driver name='qemu' type='qcow2'/>
-          <source file='/home/mostafa/Downloads/xenial-server-cloudimg-amd64-disk1.img'/>
+          <source file='/home/mostafa/source/spinup/disk.img'/>
           <backingStore/>
           <target dev='vda' bus='virtio'/>
           <alias name='virtio-disk0'/>
