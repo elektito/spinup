@@ -3,6 +3,7 @@
 import os
 import sys
 import subprocess
+import yaml
 import libvirt
 from tempfile import mkdtemp
 
@@ -25,16 +26,21 @@ def create_cloudconfig_disk():
     public_key = public_key.strip()[public_key.index(' ') + 1:]
     public_key = public_key.strip()[:public_key.index(' ')]
 
-    meta_data = '''
-instance-id: "{instance_id}",
-local-hostname: "{hostname}"
-    '''.format(instance_id=instance_id, hostname=hostname)
+    meta_data = {
+        'instance-id': instance_id,
+        'local-hostname': hostname
+    }
 
-    user_data = '''#cloud-config
+    meta_data = yaml.dump(meta_data)
 
-ssh_authorized_keys:
- - "ssh-rsa {public_key} ubuntu@{hostname}"
-    '''.format(public_key=public_key, hostname=hostname)
+    user_data = {
+        'ssh_authorized_keys': [
+            'ssh-rsa {public_key} ubuntu@{hostname}'.format(
+                public_key=public_key, hostname=hostname)
+        ]
+    }
+
+    user_data = '#cloud-config\n\n' + yaml.dump(user_data)
 
     config_iso = '.config.iso'
     tmpdir = mkdtemp()
