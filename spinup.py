@@ -175,9 +175,12 @@ def get_image(os_type, os_variant):
 def create_disk_image(base_image, machine):
     print('Creating disk image...')
     image_filename = os.path.join(BASE_IMAGE_DIR, machine['id'] + '-disk.img')
-    run_cmd('qemu-img create -f qcow2 -b {base_image} {image_filename}'.format(
+    code, out, err = run_cmd('qemu-img create -f qcow2 -b {base_image} {image_filename}'.format(
         base_image=base_image,
         image_filename=image_filename))
+    if code != 0:
+        print('Error creating image:', err.decode() if err else out.decode())
+        exit(1)
     return image_filename
 
 def find_dhcp_lease(conn, mac):
