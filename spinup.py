@@ -206,9 +206,28 @@ def ssh_vm(conn, domain, directory, machine):
 
     subprocess.call(cmd.split(' '))
 
+def destroy_vm(conn, domain, directory, machine):
+    xml = domain.XMLDesc()
+    tree = ET.fromstring(xml)
+    disk_file = tree.find('./devices/disk[@device="disk"]/source').attrib['file']
+    config_drive_file = tree.find('./devices/disk[@device="cdrom"]/source').attrib['file']
+
+    print('Destroying VM...')
+    domain.destroy()
+
+    print('Undefining VM...')
+    domain.undefine()
+
+    print('Removing disk images...')
+    os.unlink(disk_file)
+    os.unlink(config_drive_file)
+
+    print('VM destroyed.')
+
 cmd_to_func = {
     'create': create_vm,
     'ssh': ssh_vm,
+    'destroy': destroy_vm,
 }
 
 def get_command():
