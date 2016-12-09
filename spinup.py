@@ -4,6 +4,8 @@ import os
 import sys
 import subprocess
 import uuid
+import socket
+import time
 import yaml
 import libvirt
 import xml.etree.ElementTree as ET
@@ -169,7 +171,20 @@ def create_vm(conn, path, machine):
     lease = find_dhcp_lease(conn, mac)
     while not lease:
         lease = find_dhcp_lease(conn, mac)
-    print('Machine IP address:', lease['ipaddr'])
+    ip = lease['ipaddr']
+    print('Machine IP address:', ip)
+
+    print('Waiting for SSH port to open...')
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    while True:
+        try:
+            sock.connect((ip, 22))
+        except ConnectionRefusedError:
+            pass
+        else:
+            sock.close()
+            break
+        time.sleep(0.1)
 
     print('VM created successfully.')
 
