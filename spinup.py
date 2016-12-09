@@ -197,9 +197,9 @@ def create_vm(conn, domain, path, machine, args):
 
     machine['id'] = path.replace('/', '-') + '-' + str(uuid.uuid4())
     machine['id'] = machine['id'][1:]
-    machine['config_drive'] = create_cloud_config_drive(machine)
     base_image = get_image(machine['os_type'], machine['os_variant'])
     machine['disk_image'] = create_disk_image(base_image, machine)
+    machine['config_drive'] = create_cloud_config_drive(machine)
 
     xml = xml_template.format(
         path=path,
