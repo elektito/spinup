@@ -170,7 +170,7 @@ def create_vm(conn, domain, path, machine, args):
     print('Launching VM...')
     domain.create()
 
-    print('Waiting for an ARP table entry to appear...')
+    print('Waiting for a DHCP lease to appear...')
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
     mac = tree.find('./devices/interface[@type="network"]/mac').attrib['address']
