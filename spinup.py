@@ -147,10 +147,12 @@ def find_dhcp_lease(conn, mac):
         if lease['mac'] == mac:
             return lease
 
-def create_vm(conn, domain, path, machine):
+def create_vm(conn, domain, path, machine, args):
     if domain:
         print('VM already exists.')
         return
+
+    process_create_args(args, machine)
 
     machine['id'] = path.replace('/', '-') + '-' + str(uuid.uuid4())
     machine['id'] = machine['id'][1:]
@@ -193,7 +195,7 @@ def create_vm(conn, domain, path, machine):
 
     print('VM created successfully.')
 
-def ssh_vm(conn, domain, directory, machine):
+def ssh_vm(conn, domain, directory, machine, args):
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
     mac = tree.find('./devices/interface[@type="network"]/mac').attrib['address']
@@ -207,7 +209,7 @@ def ssh_vm(conn, domain, directory, machine):
 
     subprocess.call(cmd.split(' '))
 
-def destroy_vm(conn, domain, directory, machine):
+def destroy_vm(conn, domain, directory, machine, args):
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
     disk_file = tree.find('./devices/disk[@device="disk"]/source').attrib['file']
@@ -259,24 +261,16 @@ def process_cpu_arg(arg, match, machine):
 
     machine['cpus'] = value
 
-arg_processors = [
+create_arg_processors = [
     ('(?P<value>\\d+)(?P<unit>[KMGT])', process_mem_arg),
     ('(?P<value>\\d+)cpus', process_cpu_arg),
 ]
 
-def process_args(machine):
-    global arg_processors
-
-    args = sys.argv
-    if len(args) > 1 and args[1] in cmd_to_func:
-        cmd = args[1]
-        args = args[2:]
-    else:
-        cmd = 'create'
-        args = args[1:]
+def process_create_args(args, machine):
+    global create_arg_processors
 
     arg_processors = [(re.compile(regex), processor)
-                      for regex, processor in arg_processors]
+                      for regex, processor in create_arg_processors]
 
     for arg in args:
         for regex, update_func in arg_processors:
@@ -288,7 +282,16 @@ def process_args(machine):
             print('Invalid argument:', arg)
             exit(1)
 
-    return cmd
+def process_args():
+    args = sys.argv
+    if len(args) > 1 and args[1] in cmd_to_func:
+        cmd = args[1]
+        args = args[2:]
+    else:
+        cmd = 'create'
+        args = args[1:]
+
+    return cmd, args
 
 def main():
     uri = 'qemu:///system'
@@ -319,8 +322,8 @@ def main():
     else:
         domain = None
 
-    cmd = process_args(machine)
-    cmd_to_func[cmd](conn, domain, cwd, machine)
+    cmd, args = process_args()
+    cmd_to_func[cmd](conn, domain, cwd, machine, args)
 
 if __name__ == '__main__':
     main()
