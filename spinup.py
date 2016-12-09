@@ -6,6 +6,7 @@ import subprocess
 import uuid
 import socket
 import time
+import re
 import yaml
 import libvirt
 import xml.etree.ElementTree as ET
@@ -27,7 +28,7 @@ xml_template = '''
   <os>
     <type>hvm</type>
   </os>
-  <memory unit='MiB'>1024</memory>
+  <memory unit='MiB'>{memory}</memory>
 
   <devices>
     <os>
@@ -158,8 +159,7 @@ def create_vm(conn, domain, path, machine):
 
     xml = xml_template.format(
         path=path,
-        config_drive=machine['config_drive'],
-        disk_image=machine['disk_image'])
+        **machine)
 
     print('Defining VM...')
     domain = conn.defineXML(xml)
@@ -230,11 +230,54 @@ cmd_to_func = {
     'destroy': destroy_vm,
 }
 
-def get_command():
-    if len(sys.argv) > 1 and sys.argv[1] in cmd_to_func:
-        return sys.argv[1]
+def process_mem_arg(arg, match, machine):
+    value = int(match.group('value'))
+    unit = match.group('unit')
+
+    if unit:
+        mult = {
+            'K': 2**10,
+            'M': 2**20,
+            'G': 2**30,
+            'T': 2**40,
+        }[unit]
+        value *= mult
+
+    if value < 2**20:
+        print('Too little memory:', arg)
+        exit(1)
+
+    machine['memory'] = int(value / 2**20)
+
+arg_processors = [
+    ('(?P<value>\\d+)(?P<unit>[KMGT])?', process_mem_arg),
+]
+
+def process_args(machine):
+    global arg_processors
+
+    args = sys.argv
+    if len(args) > 1 and args[1] in cmd_to_func:
+        cmd = args[1]
+        args = args[2:]
     else:
-        return 'create'
+        cmd = 'create'
+        args = args[1:]
+
+    arg_processors = [(re.compile(regex), processor)
+                      for regex, processor in arg_processors]
+
+    for arg in args:
+        for regex, update_func in arg_processors:
+            match = regex.fullmatch(arg)
+            if match:
+                update_func(arg, match, machine)
+                break
+        else:
+            print('Invalid argument:', arg)
+            exit(1)
+
+    return cmd
 
 def main():
     uri = 'qemu:///system'
@@ -263,7 +306,7 @@ def main():
     else:
         domain = None
 
-    cmd = get_command()
+    cmd = process_args(machine)
     cmd_to_func[cmd](conn, domain, cwd, machine)
 
 if __name__ == '__main__':
