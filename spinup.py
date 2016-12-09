@@ -188,6 +188,16 @@ def create_vm(conn, path, machine):
 
     print('VM created successfully.')
 
+cmd_to_func = {
+    'create': create_vm,
+}
+
+def get_command():
+    if len(sys.argv) > 1 and sys.argv[1] in cmd_to_func:
+        return sys.argv[1]
+    else:
+        return 'create'
+
 def main():
     uri = 'qemu:///system'
 
@@ -214,7 +224,8 @@ def main():
                 print('VM already exists.')
                 return
 
-    create_vm(conn, cwd, machine)
+    cmd = get_command()
+    cmd_to_func[cmd](conn, cwd, machine)
 
 if __name__ == '__main__':
     main()
