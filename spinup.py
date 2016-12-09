@@ -58,9 +58,8 @@ xml_template = '''
       <target type='serial' port='0'/>
       <alias name='serial0'/>
     </console>
-    <interface type='bridge'>
-      <source bridge='virbr0'/>
-      <model type='virtio'/>
+    <interface type='network'>
+      <source network='default'/>
     </interface>
   </devices>
 
@@ -139,6 +138,11 @@ def create_disk_image(base_image, machine):
         image_filename=image_filename))
     return image_filename
 
+def find_dhcp_lease(conn, mac):
+    for lease in conn.networkLookupByName('default').DHCPLeases():
+        if lease['mac'] == mac:
+            return lease
+
 def create_vm(conn, path, machine):
     machine['id'] = path.replace('/', '-') + '-' + str(uuid.uuid4())
     machine['id'] = machine['id'][1:]
@@ -156,6 +160,18 @@ def create_vm(conn, path, machine):
 
     print('Launching VM...')
     domain.create()
+
+    print('Waiting for an ARP table entry to appear...')
+    xml = domain.XMLDesc()
+    tree = ET.fromstring(xml)
+    mac = tree.find('./devices/interface[@type="network"]/mac').attrib['address']
+
+    lease = find_dhcp_lease(conn, mac)
+    while not lease:
+        lease = find_dhcp_lease(conn, mac)
+    print('Machine IP address:', lease['ipaddr'])
+
+    print('VM created successfully.')
 
 def main():
     uri = 'qemu:///system'
