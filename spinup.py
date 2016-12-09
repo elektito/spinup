@@ -9,8 +9,11 @@ import time
 import re
 import yaml
 import libvirt
+import requests
+import yarl
 import xml.etree.ElementTree as ET
 from tempfile import mkdtemp
+from tqdm import tqdm
 
 BASE_IMAGE_DIR = '/var/lib/spinup/images'
 
@@ -131,8 +134,43 @@ def create_cloud_config_drive(machine):
     return os.path.abspath(config_iso)
 
 def get_image(os_type, os_variant):
-    if os_type == 'linux' and os_variant == 'ubuntu':
-        return os.path.join(BASE_IMAGE_DIR, 'xenial-server-cloudimg-amd64-disk1.img')
+    if os_type == 'linux':
+        if os_variant == 'ubuntu':
+            filename = 'ubuntu-16.04-server-cloudimg-amd64-disk1.img'
+            url = 'https://cloud-images.ubuntu.com/releases/releases/16.04/release/ubuntu-16.04-server-cloudimg-amd64-disk1.img'
+        elif os_variant == 'centos':
+            filename = 'CentOS-7-x86_64-GenericCloud-1503.qcow2'
+            url = 'http://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1503.qcow2.xz'
+
+    path = os.path.join(BASE_IMAGE_DIR, filename)
+    if not os.path.exists(path):
+        _, target_filename = os.path.split(yarl.URL(url).path)
+        target = os.path.join(BASE_IMAGE_DIR, target_filename)
+        response = requests.get(url, stream=True)
+        total = int(response.headers.get('Content-Length'))
+        with open(target, 'wb') as f:
+            chunk_size = 2**20
+            for data in tqdm(response.iter_content(chunk_size),
+                             total=total/chunk_size, unit='MiB',
+                             desc='Downloading disk image'):
+                f.write(data)
+
+        code = 0
+        if target_filename.endswith('.xz'):
+            print('Decompressing image...')
+            code, out, err = run_cmd('unxz {}'.format(target))
+        elif target_filename.endswith('.gz'):
+            print('Decompressing image...')
+            code, out, err = run_cmd('gunzip {}'.format(target))
+        elif target_filename.endswith('.bz2'):
+            print('Decompressing image...')
+            code, out, err = run_cmd('bunzip2 {}'.format(target))
+
+        if code != 0:
+            print('Error decompressing image:', err.decode() if err else out)
+            exit(1)
+
+    return path
 
 def create_disk_image(base_image, machine):
     print('Creating disk image...')
@@ -261,9 +299,13 @@ def process_cpu_arg(arg, match, machine):
 
     machine['cpus'] = value
 
+def process_os_arg(arg, match, machine):
+    machine['os_variant'] = match.group('variant')
+
 create_arg_processors = [
     ('(?P<value>\\d+)(?P<unit>[KMGT])', process_mem_arg),
     ('(?P<value>\\d+)cpus', process_cpu_arg),
+    ('(?P<variant>ubuntu|centos)', process_os_arg),
 ]
 
 def process_create_args(args, machine):
