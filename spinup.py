@@ -29,6 +29,7 @@ xml_template = '''
     <type>hvm</type>
   </os>
   <memory unit='MiB'>{memory}</memory>
+  <vcpu>{cpus}</vcpu>
 
   <devices>
     <os>
@@ -249,8 +250,18 @@ def process_mem_arg(arg, match, machine):
 
     machine['memory'] = int(value / 2**20)
 
+def process_cpu_arg(arg, match, machine):
+    value = int(match.group('value'))
+
+    if value == 0:
+        print('Can\'t have zero CPUs.')
+        exit(1)
+
+    machine['cpus'] = value
+
 arg_processors = [
     ('(?P<value>\\d+)(?P<unit>[KMGT])?', process_mem_arg),
+    ('(?P<value>\\d+)cpus', process_cpu_arg),
 ]
 
 def process_args(machine):
@@ -291,7 +302,9 @@ def main():
         'instance_id': 'foo',
         'hostname': 'foo',
         'os_type': 'linux',
-        'os_variant': 'ubuntu'
+        'os_variant': 'ubuntu',
+        'memory': 1024,
+        'cpus': 1,
     }
 
     for domain_id in conn.listDomainsID():
