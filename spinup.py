@@ -145,7 +145,11 @@ def find_dhcp_lease(conn, mac):
         if lease['mac'] == mac:
             return lease
 
-def create_vm(conn, path, machine):
+def create_vm(conn, domain, path, machine):
+    if domain:
+        print('VM already exists.')
+        return
+
     machine['id'] = path.replace('/', '-') + '-' + str(uuid.uuid4())
     machine['id'] = machine['id'][1:]
     machine['config_drive'] = create_cloud_config_drive(machine)
@@ -188,8 +192,23 @@ def create_vm(conn, path, machine):
 
     print('VM created successfully.')
 
+def ssh_vm(conn, domain, directory, machine):
+    xml = domain.XMLDesc()
+    tree = ET.fromstring(xml)
+    mac = tree.find('./devices/interface[@type="network"]/mac').attrib['address']
+    lease = find_dhcp_lease(conn, mac)
+    ip = lease['ipaddr']
+
+    cmd = 'ssh -o StrictHostKeyChecking=no '
+    cmd += '-o UserKnownHostsFile=/dev/null '
+    cmd += '-o LogLevel=QUIET '
+    cmd += 'ubuntu@{}'.format(ip)
+
+    subprocess.call(cmd.split(' '))
+
 cmd_to_func = {
     'create': create_vm,
+    'ssh': ssh_vm,
 }
 
 def get_command():
@@ -221,11 +240,12 @@ def main():
             tree = ET.fromstring(metadata)
             path = tree.find('./path').text
             if path == cwd:
-                print('VM already exists.')
-                return
+                break
+    else:
+        domain = None
 
     cmd = get_command()
-    cmd_to_func[cmd](conn, cwd, machine)
+    cmd_to_func[cmd](conn, domain, cwd, machine)
 
 if __name__ == '__main__':
     main()
