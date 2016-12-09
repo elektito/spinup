@@ -260,7 +260,7 @@ def process_cpu_arg(arg, match, machine):
     machine['cpus'] = value
 
 arg_processors = [
-    ('(?P<value>\\d+)(?P<unit>[KMGT])?', process_mem_arg),
+    ('(?P<value>\\d+)(?P<unit>[KMGT])', process_mem_arg),
     ('(?P<value>\\d+)cpus', process_cpu_arg),
 ]
 
