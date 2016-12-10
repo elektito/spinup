@@ -7,6 +7,8 @@ import uuid
 import socket
 import time
 import re
+import base64
+import pickle
 import yaml
 import libvirt
 import requests
@@ -26,6 +28,7 @@ xml_template = '''
   <metadata>
     <spinup:instance xmlns:spinup='http://spinup.io/instance'>
       <spinup:path>{path}</spinup:path>
+      <spinup:pickled-machine>{pickled_machine}</spinup:pickled-machine>
     </spinup:instance>
   </metadata>
   <os>
@@ -201,8 +204,11 @@ def create_vm(conn, domain, path, machine, args):
     machine['disk_image'] = create_disk_image(base_image, machine)
     machine['config_drive'] = create_cloud_config_drive(machine)
 
+    pickled_machine = base64.b64encode(pickle.dumps(machine)).decode()
+
     xml = xml_template.format(
         path=path,
+        pickled_machine=pickled_machine,
         **machine)
 
     print('Defining VM...')
@@ -363,6 +369,8 @@ def main():
             tree = ET.fromstring(metadata)
             path = tree.find('./path').text
             if path == cwd:
+                pickled_machine = tree.find('./pickled-machine').text
+                machine = pickle.loads(base64.b64decode(pickled_machine))
                 break
     else:
         domain = None
