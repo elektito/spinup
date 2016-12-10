@@ -27,4 +27,5 @@ A few use cases:
 
 `spinup` is at the moment in its very early stages of development. You
 might need to do some setting up before it will work correctly on your
-computer.
+computer. The included `prepare.sh` script is supposed to help you do
+the one-off work you might need.
