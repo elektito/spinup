@@ -266,6 +266,10 @@ def create_vm(conn, domain, path, machine, args):
     print('VM created successfully.')
 
 def ssh_vm(conn, domain, directory, machine, args):
+    if not domain:
+        print('No VM found for in this directory.')
+        exit(1)
+
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
     mac = tree.find('./devices/interface[@type="network"]/mac').attrib['address']
@@ -282,6 +286,10 @@ def ssh_vm(conn, domain, directory, machine, args):
     subprocess.call(cmd.split(' '))
 
 def destroy_vm(conn, domain, directory, machine, args):
+    if not domain:
+        print('No VM found for in this directory.')
+        exit(1)
+
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
     disk_file = tree.find('./devices/disk[@device="disk"]/source').attrib['file']
