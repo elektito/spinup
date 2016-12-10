@@ -84,6 +84,13 @@ def run_cmd(cmd):
     out, err = proc.communicate()
     return proc.returncode, out, err
 
+def get_default_username(machine):
+    return {
+        'ubuntu': 'ubuntu',
+        'centos': 'centos',
+        'coreos': 'core',
+    }[machine['os_variant']]
+
 def create_cloud_config_drive(machine):
     print('Creating config drive...')
     with open(os.path.expanduser('~/.ssh/id_rsa.pub')) as f:
@@ -101,8 +108,11 @@ def create_cloud_config_drive(machine):
     meta_data = yaml.dump(meta_data)
 
     user_data = {
+        'hostname': machine['hostname'],
+
         'ssh_authorized_keys': [
-            'ssh-rsa {public_key} ubuntu@{hostname}'.format(
+            'ssh-rsa {public_key} {username}@{hostname}'.format(
+                username=get_default_username(machine),
                 public_key=public_key,
                 hostname=machine['hostname'])
         ]
@@ -127,8 +137,18 @@ def create_cloud_config_drive(machine):
         os.unlink(config_iso)
     except FileNotFoundError:
         pass
-    run_cmd('genisoimage -o {} -V cidata -r -J {} {}'.format(
-        config_iso, user_data_file, meta_data_file))
+
+    if machine['os_variant'] == 'coreos':
+        cmd = 'genisoimage -o {} -V config-2 -r -graft-points ' \
+              '-J openstack/latest/user_data={} {}'.format(
+                  config_iso, user_data_file, meta_data_file)
+    else:
+        cmd = 'genisoimage -o {} -V cidata -r -J {} {}'.format(
+            config_iso, user_data_file, meta_data_file)
+    code, out, err = run_cmd(cmd)
+    if code != 0:
+        print('Error creating ISO image:', err.decode() if err else out.decode())
+        exit(1)
 
     os.unlink(meta_data_file)
     os.unlink(user_data_file)
@@ -144,6 +164,9 @@ def get_image(os_type, os_variant):
         elif os_variant == 'centos':
             filename = 'CentOS-7-x86_64-GenericCloud-1503.qcow2'
             url = 'http://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1503.qcow2.xz'
+        elif os_variant == 'coreos':
+            filename = 'coreos_production_qemu_image.img'
+            url = 'https://alpha.release.core-os.net/amd64-usr/current/coreos_production_qemu_image.img.bz2'
 
     path = os.path.join(BASE_IMAGE_DIR, filename)
     if not os.path.exists(path):
@@ -249,10 +272,12 @@ def ssh_vm(conn, domain, directory, machine, args):
     lease = find_dhcp_lease(conn, mac)
     ip = lease['ipaddr']
 
+    username = get_default_username(machine)
+
     cmd = 'ssh -o StrictHostKeyChecking=no '
     cmd += '-o UserKnownHostsFile=/dev/null '
     cmd += '-o LogLevel=QUIET '
-    cmd += 'ubuntu@{}'.format(ip)
+    cmd += '{}@{}'.format(username, ip)
 
     subprocess.call(cmd.split(' '))
 
@@ -314,7 +339,7 @@ def process_os_arg(arg, match, machine):
 create_arg_processors = [
     ('(?P<value>\\d+)(?P<unit>[KMGT])', process_mem_arg),
     ('(?P<value>\\d+)cpus', process_cpu_arg),
-    ('(?P<variant>ubuntu|centos)', process_os_arg),
+    ('(?P<variant>ubuntu|centos|coreos)', process_os_arg),
 ]
 
 def process_create_args(args, machine):
