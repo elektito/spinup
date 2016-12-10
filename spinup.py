@@ -347,7 +347,7 @@ def process_os_arg(arg, match, machine):
 
 create_arg_processors = [
     ('(?P<value>\\d+)(?P<unit>[KMGT])', process_mem_arg),
-    ('(?P<value>\\d+)cpus', process_cpu_arg),
+    ('(?P<value>\\d+)cpus?', process_cpu_arg),
     ('(?P<variant>ubuntu|centos|coreos)', process_os_arg),
 ]
 
