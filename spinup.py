@@ -248,6 +248,7 @@ def create_vm(conn, domain, path, machine, args):
     lease = find_dhcp_lease(conn, mac)
     while not lease:
         lease = find_dhcp_lease(conn, mac)
+        time.sleep(0.1)
     ip = lease['ipaddr']
     print('Machine IP address:', ip)
 
