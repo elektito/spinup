@@ -13,6 +13,10 @@ A few use cases:
 
         $ spinup 4G 6cpus
 
+ - Launch a CoreOS machine with 2G of RAM:
+
+        $ spinup coreos 2G
+
  - SSH into a machine spun up in the current directory.
 
         $ spinup ssh
