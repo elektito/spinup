@@ -1,2 +1,6 @@
 libvirt-python==2.4.0
+multidict==2.1.4
 PyYAML==3.12
+requests==2.12.3
+tqdm==4.10.0
+yarl==0.8.1
