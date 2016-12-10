@@ -267,7 +267,7 @@ def create_vm(conn, domain, path, machine, args):
 
 def ssh_vm(conn, domain, directory, machine, args):
     if not domain:
-        print('No VM found for in this directory.')
+        print('No VM found in this directory.')
         exit(1)
 
     xml = domain.XMLDesc()
@@ -287,7 +287,7 @@ def ssh_vm(conn, domain, directory, machine, args):
 
 def destroy_vm(conn, domain, directory, machine, args):
     if not domain:
-        print('No VM found for in this directory.')
+        print('No VM found in this directory.')
         exit(1)
 
     xml = domain.XMLDesc()
