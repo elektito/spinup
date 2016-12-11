@@ -121,7 +121,7 @@ def create_cloud_config_drive(machine):
                 hostname=machine['hostname'])
         ],
 
-        'manage_etc_hosts': True,
+        'manage_etc_hosts': 'localhost',
     }
 
     user_data = '#cloud-config\n\n' + yaml.dump(user_data)
