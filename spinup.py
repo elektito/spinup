@@ -21,10 +21,10 @@ BASE_IMAGE_DIR = '/var/lib/spinup/images'
 
 xml_template = '''
 <domain type='kvm'>
-  <name>foo</name>
-  <uuid>a1e08189-8d43-495a-85de-079b14781239</uuid>
-  <title>some title</title>
-  <description>some description</description>
+  <name>{cluster_id}{name}</name>
+  <uuid>{uuid}</uuid>
+  <title>{name}</title>
+  <description>{description}</description>
   <metadata>
     <spinup:instance xmlns:spinup='http://spinup.io/instance'>
       <spinup:path>{path}</spinup:path>
@@ -120,7 +120,7 @@ def create_cloud_config_drive(machine):
 
     user_data = '#cloud-config\n\n' + yaml.dump(user_data)
 
-    config_iso = os.path.join(BASE_IMAGE_DIR, machine['id'] + '-config.iso')
+    config_iso = os.path.join(BASE_IMAGE_DIR, machine['instance_id'] + '-config.iso')
     tmpdir = mkdtemp()
     meta_data_file = os.path.join(tmpdir, 'meta-data')
     user_data_file = os.path.join(tmpdir, 'user-data')
@@ -200,7 +200,7 @@ def get_image(os_type, os_variant):
 
 def create_disk_image(base_image, machine):
     print('Creating disk image...')
-    image_filename = os.path.join(BASE_IMAGE_DIR, machine['id'] + '-disk.img')
+    image_filename = os.path.join(BASE_IMAGE_DIR, machine['instance_id'] + '-disk.img')
     code, out, err = run_cmd('qemu-img create -f qcow2 -b {base_image} {image_filename}'.format(
         base_image=base_image,
         image_filename=image_filename))
@@ -249,13 +249,20 @@ descriptor_processors = [
     ('(?P<variant>ubuntu|centos|coreos)', process_os_descriptor),
 ]
 
-def get_machine(descriptors):
+def get_machine(path, descriptors):
     global descriptor_processors
 
     # start with a default machine
+    uuid4 = str(uuid.uuid4())
+    cluster_id = path.replace('/', '-') + '-' + uuid4
+    name = 'machine1'
     machine = {
-        'instance_id': 'foo',
-        'hostname': 'foo',
+        'uuid': uuid4,
+        'name': name,
+        'cluster_id': cluster_id,
+        'instance_id': cluster_id + '-1',
+        'hostname': name,
+        'description': '',
         'os_type': 'linux',
         'os_variant': 'ubuntu',
         'memory': 1024,
@@ -282,10 +289,8 @@ def create_vm(conn, path, args):
     if domain:
         raise RuntimeError('VM already exists.')
 
-    machine = get_machine(args)
+    machine = get_machine(path, args)
 
-    machine['id'] = path.replace('/', '-') + '-' + str(uuid.uuid4())
-    machine['id'] = machine['id'][1:]
     base_image = get_image(machine['os_type'], machine['os_variant'])
     machine['disk_image'] = create_disk_image(base_image, machine)
     machine['config_drive'] = create_cloud_config_drive(machine)
