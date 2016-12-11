@@ -414,15 +414,6 @@ def main():
     print('Connecting to libvirt at {}...'.format(uri))
     conn = libvirt.open(uri)
 
-    machine = {
-        'instance_id': 'foo',
-        'hostname': 'foo',
-        'os_type': 'linux',
-        'os_variant': 'ubuntu',
-        'memory': 1024,
-        'cpus': 1,
-    }
-
     cmd, args = process_args()
 
     try:
