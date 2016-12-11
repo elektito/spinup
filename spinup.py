@@ -214,12 +214,79 @@ def find_dhcp_lease(conn, mac):
         if lease['mac'] == mac:
             return lease
 
-def create_vm(conn, domain, path, machine, args):
+def process_mem_descriptor(desc, match, machine):
+    value = int(match.group('value'))
+    unit = match.group('unit')
+
+    if unit:
+        mult = {
+            'K': 2**10,
+            'M': 2**20,
+            'G': 2**30,
+            'T': 2**40,
+        }[unit]
+        value *= mult
+
+    if value < 2**20:
+        print('Too little memory:', desc)
+        exit(1)
+
+    machine['memory'] = int(value / 2**20)
+
+def process_cpu_descriptor(desc, match, machine):
+    value = int(match.group('value'))
+
+    if value == 0:
+        print('Can\'t have zero CPUs.')
+        exit(1)
+
+    machine['cpus'] = value
+
+def process_os_descriptor(desc, match, machine):
+    machine['os_variant'] = match.group('variant')
+
+descriptor_processors = [
+    ('(?P<value>\\d+)(?P<unit>[KMGT])', process_mem_descriptor),
+    ('(?P<value>\\d+)cpus?', process_cpu_descriptor),
+    ('(?P<variant>ubuntu|centos|coreos)', process_os_descriptor),
+]
+
+def get_machine(descriptors):
+    global descriptor_processors
+
+    # start with a default machine
+    machine = {
+        'instance_id': 'foo',
+        'hostname': 'foo',
+        'os_type': 'linux',
+        'os_variant': 'ubuntu',
+        'memory': 1024,
+        'cpus': 1,
+    }
+
+    # compile regular expressions
+    processors = [(re.compile(regex), processor)
+                  for regex, processor in descriptor_processors]
+
+    for desc in descriptors:
+        for regex, update_func in processors:
+            match = regex.fullmatch(desc)
+            if match:
+                update_func(desc, match, machine)
+                break
+        else:
+            print('Invalid descriptor:', desc)
+            exit(1)
+
+    return machine
+
+def create_vm(conn, path, args):
+    domain, machine = get_current_machine(conn, path)
     if domain:
         print('VM already exists.')
         return
 
-    process_create_args(args, machine)
+    machine = get_machine(args)
 
     machine['id'] = path.replace('/', '-') + '-' + str(uuid.uuid4())
     machine['id'] = machine['id'][1:]
@@ -266,7 +333,8 @@ def create_vm(conn, domain, path, machine, args):
 
     print('VM created successfully.')
 
-def ssh_vm(conn, domain, directory, machine, args):
+def ssh_vm(conn, path, args):
+    domain, machine = get_current_machine(conn, path)
     if not domain:
         print('No VM found in this directory.')
         exit(1)
@@ -286,7 +354,8 @@ def ssh_vm(conn, domain, directory, machine, args):
 
     subprocess.call(cmd.split(' '))
 
-def destroy_vm(conn, domain, directory, machine, args):
+def destroy_vm(conn, path, args):
+    domain, machine = get_current_machine(conn, path)
     if not domain:
         print('No VM found in this directory.')
         exit(1)
@@ -314,59 +383,6 @@ cmd_to_func = {
     'destroy': destroy_vm,
 }
 
-def process_mem_arg(arg, match, machine):
-    value = int(match.group('value'))
-    unit = match.group('unit')
-
-    if unit:
-        mult = {
-            'K': 2**10,
-            'M': 2**20,
-            'G': 2**30,
-            'T': 2**40,
-        }[unit]
-        value *= mult
-
-    if value < 2**20:
-        print('Too little memory:', arg)
-        exit(1)
-
-    machine['memory'] = int(value / 2**20)
-
-def process_cpu_arg(arg, match, machine):
-    value = int(match.group('value'))
-
-    if value == 0:
-        print('Can\'t have zero CPUs.')
-        exit(1)
-
-    machine['cpus'] = value
-
-def process_os_arg(arg, match, machine):
-    machine['os_variant'] = match.group('variant')
-
-create_arg_processors = [
-    ('(?P<value>\\d+)(?P<unit>[KMGT])', process_mem_arg),
-    ('(?P<value>\\d+)cpus?', process_cpu_arg),
-    ('(?P<variant>ubuntu|centos|coreos)', process_os_arg),
-]
-
-def process_create_args(args, machine):
-    global create_arg_processors
-
-    arg_processors = [(re.compile(regex), processor)
-                      for regex, processor in create_arg_processors]
-
-    for arg in args:
-        for regex, update_func in arg_processors:
-            match = regex.fullmatch(arg)
-            if match:
-                update_func(arg, match, machine)
-                break
-        else:
-            print('Invalid argument:', arg)
-            exit(1)
-
 def process_args():
     args = sys.argv
     if len(args) > 1 and args[1] in cmd_to_func:
@@ -377,6 +393,24 @@ def process_args():
         args = args[1:]
 
     return cmd, args
+
+def get_current_machine(conn, source_dir):
+    for domain_id in conn.listDomainsID():
+        domain = conn.lookupByID(domain_id)
+        metadata = domain.metadata(libvirt.VIR_DOMAIN_METADATA_ELEMENT,
+                                   'http://spinup.io/instance')
+        if metadata:
+            tree = ET.fromstring(metadata)
+            path = tree.find('./path').text
+            if path == source_dir:
+                pickled_machine = tree.find('./pickled-machine').text
+                machine = pickle.loads(base64.b64decode(pickled_machine))
+                break
+    else:
+        domain = None
+        machine = None
+
+    return domain, machine
 
 def main():
     uri = 'qemu:///system'
@@ -395,22 +429,8 @@ def main():
         'cpus': 1,
     }
 
-    for domain_id in conn.listDomainsID():
-        domain = conn.lookupByID(domain_id)
-        metadata = domain.metadata(libvirt.VIR_DOMAIN_METADATA_ELEMENT,
-                                   'http://spinup.io/instance')
-        if metadata:
-            tree = ET.fromstring(metadata)
-            path = tree.find('./path').text
-            if path == cwd:
-                pickled_machine = tree.find('./pickled-machine').text
-                machine = pickle.loads(base64.b64decode(pickled_machine))
-                break
-    else:
-        domain = None
-
     cmd, args = process_args()
-    cmd_to_func[cmd](conn, domain, cwd, machine, args)
+    cmd_to_func[cmd](conn, cwd, args)
 
 if __name__ == '__main__':
     main()
