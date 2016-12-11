@@ -9,7 +9,6 @@ import time
 import re
 import base64
 import pickle
-import itertools
 import yaml
 import libvirt
 import requests
@@ -340,10 +339,19 @@ def create_single_vm(arg):
 
     print('{}: VM created successfully.'.format(machine['name']))
 
+def split_list(list, sep):
+    parts = []
+    part = []
+    for e in list:
+        if e == sep:
+            parts.append(part)
+        else:
+            part.append(e)
+    parts.append(part)
+    return parts
+
 def create_vm(conn, path, args):
-    descriptions = [list(group) for is_sep, group
-                    in itertools.groupby(args, lambda e: e == '--')
-                    if not is_sep]
+    descriptions = split_list(args, '--')
     machines = [get_machine(i + 1, path, desc)
                 for i, desc in enumerate(descriptions)]
     duplicates = [item for item, count
