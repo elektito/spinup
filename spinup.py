@@ -248,10 +248,14 @@ def process_cpu_descriptor(desc, match, machine):
 def process_os_descriptor(desc, match, machine):
     machine['os_variant'] = match.group('variant')
 
+def process_name_descriptor(desc, match, machine):
+    machine['name'] = match.group('name')
+
 descriptor_processors = [
     ('(?P<value>\\d+)(?P<unit>[KMGT])', process_mem_descriptor),
     ('(?P<value>\\d+)cpus?', process_cpu_descriptor),
     ('(?P<variant>ubuntu|centos|coreos)', process_os_descriptor),
+    (':(?P<name>\\w+)', process_name_descriptor),
 ]
 
 def get_machine(index, path, descriptors):
@@ -266,7 +270,6 @@ def get_machine(index, path, descriptors):
         'name': name,
         'cluster_id': cluster_id,
         'instance_id': cluster_id + '-' + str(index),
-        'hostname': name,
         'description': '',
         'os_type': 'linux',
         'os_variant': 'ubuntu',
@@ -346,6 +349,10 @@ def create_vm(conn, path, args):
                   if count > 1]
     if duplicates:
         raise RuntimeError('Duplicate names: ' + ', '.join(duplicates))
+
+    # set machine hostnames
+    for machine in machines:
+        machine['hostname'] = machine['name']
 
     cluster = get_current_cluster(conn, path)
     if cluster:
