@@ -423,7 +423,7 @@ def main():
 
     try:
         cmd_to_func[cmd](conn, cwd, args)
-    except Exception as e:
+    except RuntimeError as e:
         print(e)
         exit(1)
 
