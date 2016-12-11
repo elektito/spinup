@@ -9,13 +9,18 @@ import time
 import re
 import base64
 import pickle
+import itertools
 import yaml
 import libvirt
 import requests
 import yarl
 import xml.etree.ElementTree as ET
 from tempfile import mkdtemp
+from collections import Counter
+from multiprocessing import Pool
 from tqdm import tqdm
+
+LIBVIRT_URI = 'qemu:///system'
 
 BASE_IMAGE_DIR = '/var/lib/spinup/images'
 
@@ -249,18 +254,18 @@ descriptor_processors = [
     ('(?P<variant>ubuntu|centos|coreos)', process_os_descriptor),
 ]
 
-def get_machine(path, descriptors):
+def get_machine(index, path, descriptors):
     global descriptor_processors
 
     # start with a default machine
     uuid4 = str(uuid.uuid4())
-    cluster_id = path.replace('/', '-') + '-' + uuid4
-    name = 'machine1'
+    cluster_id = path.replace('/', '-')[1:] + '-' + uuid4
+    name = 'machine-' + str(index)
     machine = {
         'uuid': uuid4,
         'name': name,
         'cluster_id': cluster_id,
-        'instance_id': cluster_id + '-1',
+        'instance_id': cluster_id + '-' + str(index),
         'hostname': name,
         'description': '',
         'os_type': 'linux',
@@ -284,13 +289,9 @@ def get_machine(path, descriptors):
 
     return machine
 
-def create_vm(conn, path, args):
-    domain, machine = get_current_machine(conn, path)
-    if domain:
-        raise RuntimeError('VM already exists.')
-
-    machine = get_machine(path, args)
-
+def create_single_vm(arg):
+    path, machine = arg
+    conn = libvirt.open(LIBVIRT_URI)
     base_image = get_image(machine['os_type'], machine['os_variant'])
     machine['disk_image'] = create_disk_image(base_image, machine)
     machine['config_drive'] = create_cloud_config_drive(machine)
@@ -302,13 +303,13 @@ def create_vm(conn, path, args):
         pickled_machine=pickled_machine,
         **machine)
 
-    print('Defining VM...')
+    print('{}: Defining VM...'.format(machine['name']))
     domain = conn.defineXML(xml)
 
-    print('Launching VM...')
+    print('{}: Launching VM...'.format(machine['name']))
     domain.create()
 
-    print('Waiting for a DHCP lease to appear...')
+    print('{}: Waiting for a DHCP lease to appear...'.format(machine['name']))
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
     mac = tree.find('./devices/interface[@type="network"]/mac').attrib['address']
@@ -318,9 +319,9 @@ def create_vm(conn, path, args):
         lease = find_dhcp_lease(conn, mac)
         time.sleep(0.1)
     ip = lease['ipaddr']
-    print('Machine IP address:', ip)
+    print('{}: Machine IP address: {}'.format(machine['name'], ip))
 
-    print('Waiting for SSH port to open...')
+    print('{}: Waiting for SSH port to open...'.format(machine['name']))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     while True:
         try:
@@ -332,12 +333,47 @@ def create_vm(conn, path, args):
             break
         time.sleep(0.1)
 
-    print('VM created successfully.')
+    print('{}: VM created successfully.'.format(machine['name']))
+
+def create_vm(conn, path, args):
+    descriptions = [list(group) for is_sep, group
+                    in itertools.groupby(args, lambda e: e == '--')
+                    if not is_sep]
+    machines = [get_machine(i + 1, path, desc)
+                for i, desc in enumerate(descriptions)]
+    duplicates = [item for item, count
+                  in Counter([m['name'] for m in machines]).items()
+                  if count > 1]
+    if duplicates:
+        raise RuntimeError('Duplicate names: ' + ', '.join(duplicates))
+
+    cluster = get_current_cluster(conn, path)
+    if cluster:
+        raise RuntimeError('A cluster is already running in this directory.')
+
+    pool = Pool(len(machines))
+    pool.map(create_single_vm, [(path, m) for m in machines])
 
 def ssh_vm(conn, path, args):
-    domain, machine = get_current_machine(conn, path)
-    if not domain:
-        raise RuntimeError('No VM found in this directory.')
+    cluster = get_current_cluster(conn, path)
+    if not cluster:
+        raise RuntimeError('No cluster found in this directory.')
+
+    if len(cluster) == 1:
+        domain, machine = cluster[0]
+    else:
+        if len(args) == 0:
+            raise RuntimeError('More than one machine in the cluster. '
+                               'Specify a machine name.')
+        elif len(args) > 1:
+            raise RuntimeError('You can only specify one machine name.')
+
+        name = args[0]
+        for domain, machine in cluster:
+            if machine['name'] == name:
+                break
+        else:
+            raise RuntimeError('No such machine in the cluster.')
 
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
@@ -355,26 +391,27 @@ def ssh_vm(conn, path, args):
     subprocess.call(cmd.split(' '))
 
 def destroy_vm(conn, path, args):
-    domain, machine = get_current_machine(conn, path)
-    if not domain:
-        raise RuntimeError('No VM found in this directory.')
+    cluster = get_current_cluster(conn, path)
+    if not cluster:
+        raise RuntimeError('No cluster found in this directory.')
 
-    xml = domain.XMLDesc()
-    tree = ET.fromstring(xml)
-    disk_file = tree.find('./devices/disk[@device="disk"]/source').attrib['file']
-    config_drive_file = tree.find('./devices/disk[@device="cdrom"]/source').attrib['file']
+    for domain, machine in cluster:
+        xml = domain.XMLDesc()
+        tree = ET.fromstring(xml)
+        disk_file = tree.find('./devices/disk[@device="disk"]/source').attrib['file']
+        config_drive_file = tree.find('./devices/disk[@device="cdrom"]/source').attrib['file']
 
-    print('Destroying VM...')
-    domain.destroy()
+        print('{}: Destroying VM...'.format(machine['name']))
+        domain.destroy()
 
-    print('Undefining VM...')
-    domain.undefine()
+        print('{}: Undefining VM...'.format(machine['name']))
+        domain.undefine()
 
-    print('Removing disk images...')
-    os.unlink(disk_file)
-    os.unlink(config_drive_file)
+        print('{}: Removing disk images...'.format(machine['name']))
+        os.unlink(disk_file)
+        os.unlink(config_drive_file)
 
-    print('VM destroyed.')
+        print('{}: VM destroyed.'.format(machine['name']))
 
 cmd_to_func = {
     'create': create_vm,
@@ -393,8 +430,10 @@ def process_args():
 
     return cmd, args
 
-def get_current_machine(conn, source_dir):
+def get_current_cluster(conn, source_dir):
+    results = []
     for domain_id in conn.listDomainsID():
+        machine = None
         domain = conn.lookupByID(domain_id)
         metadata = domain.metadata(libvirt.VIR_DOMAIN_METADATA_ELEMENT,
                                    'http://spinup.io/instance')
@@ -404,20 +443,16 @@ def get_current_machine(conn, source_dir):
             if path == source_dir:
                 pickled_machine = tree.find('./pickled-machine').text
                 machine = pickle.loads(base64.b64decode(pickled_machine))
-                break
-    else:
-        domain = None
-        machine = None
 
-    return domain, machine
+        results.append((domain, machine))
+
+    return results
 
 def main():
-    uri = 'qemu:///system'
-
     cwd = os.path.abspath(os.curdir)
 
-    print('Connecting to libvirt at {}...'.format(uri))
-    conn = libvirt.open(uri)
+    print('Connecting to libvirt at {}...'.format(LIBVIRT_URI))
+    conn = libvirt.open(LIBVIRT_URI)
 
     cmd, args = process_args()
 
