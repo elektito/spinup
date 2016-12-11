@@ -147,8 +147,8 @@ def create_cloud_config_drive(machine):
             config_iso, user_data_file, meta_data_file)
     code, out, err = run_cmd(cmd)
     if code != 0:
-        print('Error creating ISO image:', err.decode() if err else out.decode())
-        exit(1)
+        raise RuntimeError('Error creating ISO image: ' + \
+                           err.decode() if err else out.decode())
 
     os.unlink(meta_data_file)
     os.unlink(user_data_file)
@@ -193,8 +193,8 @@ def get_image(os_type, os_variant):
             code, out, err = run_cmd('bunzip2 {}'.format(target))
 
         if code != 0:
-            print('Error decompressing image:', err.decode() if err else out)
-            exit(1)
+            raise RuntimeError('Error decompressing image:' + \
+                               err.decode() if err else out)
 
     return path
 
@@ -205,8 +205,8 @@ def create_disk_image(base_image, machine):
         base_image=base_image,
         image_filename=image_filename))
     if code != 0:
-        print('Error creating image:', err.decode() if err else out.decode())
-        exit(1)
+        raise RuntimeError('Error creating image: ' + \
+                           err.decode() if err else out.decode())
     return image_filename
 
 def find_dhcp_lease(conn, mac):
@@ -228,8 +228,7 @@ def process_mem_descriptor(desc, match, machine):
         value *= mult
 
     if value < 2**20:
-        print('Too little memory:', desc)
-        exit(1)
+        raise RuntimeError('Too little memory: ' + desc)
 
     machine['memory'] = int(value / 2**20)
 
@@ -237,8 +236,7 @@ def process_cpu_descriptor(desc, match, machine):
     value = int(match.group('value'))
 
     if value == 0:
-        print('Can\'t have zero CPUs.')
-        exit(1)
+        raise RuntimeError('Can\'t have zero CPUs.')
 
     machine['cpus'] = value
 
@@ -275,16 +273,14 @@ def get_machine(descriptors):
                 update_func(desc, match, machine)
                 break
         else:
-            print('Invalid descriptor:', desc)
-            exit(1)
+            raise RuntimeError('Invalid descriptor: ' + desc)
 
     return machine
 
 def create_vm(conn, path, args):
     domain, machine = get_current_machine(conn, path)
     if domain:
-        print('VM already exists.')
-        return
+        raise RuntimeError('VM already exists.')
 
     machine = get_machine(args)
 
@@ -336,8 +332,7 @@ def create_vm(conn, path, args):
 def ssh_vm(conn, path, args):
     domain, machine = get_current_machine(conn, path)
     if not domain:
-        print('No VM found in this directory.')
-        exit(1)
+        raise RuntimeError('No VM found in this directory.')
 
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
@@ -357,8 +352,7 @@ def ssh_vm(conn, path, args):
 def destroy_vm(conn, path, args):
     domain, machine = get_current_machine(conn, path)
     if not domain:
-        print('No VM found in this directory.')
-        exit(1)
+        raise RuntimeError('No VM found in this directory.')
 
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
@@ -430,7 +424,14 @@ def main():
     }
 
     cmd, args = process_args()
-    cmd_to_func[cmd](conn, cwd, args)
+
+    try:
+        cmd_to_func[cmd](conn, cwd, args)
+    except Exception as e:
+        print(e)
+        exit(1)
+
+    exit(0)
 
 if __name__ == '__main__':
     main()
