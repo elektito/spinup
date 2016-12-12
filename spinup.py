@@ -345,6 +345,7 @@ def split_list(list, sep):
     for e in list:
         if e == sep:
             parts.append(part)
+            part = []
         else:
             part.append(e)
     parts.append(part)
