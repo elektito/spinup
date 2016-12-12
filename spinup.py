@@ -25,7 +25,7 @@ BASE_IMAGE_DIR = '/var/lib/spinup/images'
 
 xml_template = '''
 <domain type='kvm'>
-  <name>{cluster_id}{name}</name>
+  <name>{cluster_id}-{name}</name>
   <uuid>{uuid}</uuid>
   <title>{name}</title>
   <description>{description}</description>
