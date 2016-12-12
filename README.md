@@ -21,7 +21,15 @@ A few use cases:
 
         $ spinup ssh
 
- - Destroy a VM in the current directory:
+ - Launch two machines, naming them `foo` and `bar`:
+
+        $ spinup :foo 2G 2cpus -- :bar 8G 4cpus
+
+ - Now ssh into `foo`:
+
+        $ spinup ssh foo
+
+ - Destroy the cluster in the current directory:
 
         $ spinup destroy
 
