@@ -264,7 +264,9 @@ def get_machine(index, path, descriptors):
 
     # start with a default machine
     uuid4 = str(uuid.uuid4())
-    cluster_id = path.replace('/', '-')[1:] + '-' + uuid4
+    path = path[:-1] if path.endswith('/') else path
+    directory_name = os.path.split(path)[1]
+    cluster_id = directory_name + '-' + uuid4
     name = 'machine-' + str(index)
     machine = {
         'uuid': uuid4,
