@@ -96,7 +96,7 @@ def get_default_username(machine):
     }[machine['os_variant']]
 
 def create_cloud_config_drive(machine):
-    print('Creating config drive...')
+    print('{}: Creating config drive...'.format(machine['name']))
     with open(os.path.expanduser('~/.ssh/id_rsa.pub')) as f:
         public_key = f.read()
 
@@ -205,7 +205,7 @@ def get_image(os_type, os_variant):
     return path
 
 def create_disk_image(base_image, machine):
-    print('Creating disk image...')
+    print('{}: Creating disk image...'.format(machine['name']))
     image_filename = os.path.join(BASE_IMAGE_DIR, machine['instance_id'] + '-disk.img')
     code, out, err = run_cmd('qemu-img create -f qcow2 -b {base_image} {image_filename}'.format(
         base_image=base_image,
