@@ -366,9 +366,6 @@ def split_list(list, sep):
     return parts
 
 def create_vm(conn, path, args):
-    fetch_image_proc = Process(target=fetch_image, args=())
-    fetch_image_proc.start()
-
     descriptions = split_list(args, '--')
     machines = [get_machine(i + 1, path, desc)
                 for i, desc in enumerate(descriptions)]
@@ -386,11 +383,11 @@ def create_vm(conn, path, args):
     if cluster:
         raise RuntimeError('A cluster is already running in this directory.')
 
-    pool = Pool(len(machines))
+    pool = Pool(len(machines) + 1)
+    pool.apply_async(fetch_image, ())
     pool.map(create_single_vm, [(path, m) for m in machines])
 
     image_fetch_request_queue.put((None, None))
-    fetch_image_proc.join()
 
 def ssh_vm(conn, path, args):
     cluster = get_current_cluster(conn, path)
