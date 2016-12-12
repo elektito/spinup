@@ -16,7 +16,7 @@ import yarl
 import xml.etree.ElementTree as ET
 from tempfile import mkdtemp
 from collections import Counter
-from multiprocessing import Pool
+from multiprocessing import Pool, Queue, Process
 from tqdm import tqdm
 
 LIBVIRT_URI = 'qemu:///system'
@@ -162,47 +162,59 @@ def create_cloud_config_drive(machine):
 
     return os.path.abspath(config_iso)
 
+image_fetch_request_queue = Queue()
+image_fetch_result_queue = Queue()
+def fetch_image():
+    while True:
+        os_type, os_variant = image_fetch_request_queue.get()
+        if os_type == None:
+            break
+
+        if os_type == 'linux':
+            if os_variant == 'ubuntu':
+                filename = 'ubuntu-16.04-server-cloudimg-amd64-disk1.img'
+                #url = 'https://cloud-images.ubuntu.com/releases/releases/16.04/release/ubuntu-16.04-server-cloudimg-amd64-disk1.img'
+                url = 'http://localhost:8003/ubuntu-16.04-server-cloudimg-amd64-disk1.img.gz'
+            elif os_variant == 'centos':
+                filename = 'CentOS-7-x86_64-GenericCloud-1503.qcow2'
+                url = 'http://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1503.qcow2.xz'
+            elif os_variant == 'coreos':
+                filename = 'coreos_production_qemu_image.img'
+                url = 'https://alpha.release.core-os.net/amd64-usr/current/coreos_production_qemu_image.img.bz2'
+
+        path = os.path.join(BASE_IMAGE_DIR, filename)
+        if not os.path.exists(path):
+            _, target_filename = os.path.split(yarl.URL(url).path)
+            target = os.path.join(BASE_IMAGE_DIR, target_filename)
+            response = requests.get(url, stream=True)
+            total = int(response.headers.get('Content-Length'))
+            with open(target, 'wb') as f:
+                chunk_size = 2**20
+                for data in tqdm(response.iter_content(chunk_size),
+                                 total=total/chunk_size, unit='MiB',
+                                 desc='Downloading disk image'):
+                    f.write(data)
+
+            code = 0
+            if target_filename.endswith('.xz'):
+                print('Decompressing image...')
+                code, out, err = run_cmd('unxz {}'.format(target))
+            elif target_filename.endswith('.gz'):
+                print('Decompressing image...')
+                code, out, err = run_cmd('gunzip {}'.format(target))
+            elif target_filename.endswith('.bz2'):
+                print('Decompressing image...')
+                code, out, err = run_cmd('bunzip2 {}'.format(target))
+
+            if code != 0:
+                raise RuntimeError('Error decompressing image:' + \
+                                   err.decode() if err else out)
+
+        image_fetch_result_queue.put(path)
+
 def get_image(os_type, os_variant):
-    if os_type == 'linux':
-        if os_variant == 'ubuntu':
-            filename = 'ubuntu-16.04-server-cloudimg-amd64-disk1.img'
-            url = 'https://cloud-images.ubuntu.com/releases/releases/16.04/release/ubuntu-16.04-server-cloudimg-amd64-disk1.img'
-        elif os_variant == 'centos':
-            filename = 'CentOS-7-x86_64-GenericCloud-1503.qcow2'
-            url = 'http://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1503.qcow2.xz'
-        elif os_variant == 'coreos':
-            filename = 'coreos_production_qemu_image.img'
-            url = 'https://alpha.release.core-os.net/amd64-usr/current/coreos_production_qemu_image.img.bz2'
-
-    path = os.path.join(BASE_IMAGE_DIR, filename)
-    if not os.path.exists(path):
-        _, target_filename = os.path.split(yarl.URL(url).path)
-        target = os.path.join(BASE_IMAGE_DIR, target_filename)
-        response = requests.get(url, stream=True)
-        total = int(response.headers.get('Content-Length'))
-        with open(target, 'wb') as f:
-            chunk_size = 2**20
-            for data in tqdm(response.iter_content(chunk_size),
-                             total=total/chunk_size, unit='MiB',
-                             desc='Downloading disk image'):
-                f.write(data)
-
-        code = 0
-        if target_filename.endswith('.xz'):
-            print('Decompressing image...')
-            code, out, err = run_cmd('unxz {}'.format(target))
-        elif target_filename.endswith('.gz'):
-            print('Decompressing image...')
-            code, out, err = run_cmd('gunzip {}'.format(target))
-        elif target_filename.endswith('.bz2'):
-            print('Decompressing image...')
-            code, out, err = run_cmd('bunzip2 {}'.format(target))
-
-        if code != 0:
-            raise RuntimeError('Error decompressing image:' + \
-                               err.decode() if err else out)
-
-    return path
+    image_fetch_request_queue.put((os_type, os_variant))
+    return image_fetch_result_queue.get()
 
 def create_disk_image(base_image, machine):
     print('{}: Creating disk image...'.format(machine['name']))
@@ -354,6 +366,9 @@ def split_list(list, sep):
     return parts
 
 def create_vm(conn, path, args):
+    fetch_image_proc = Process(target=fetch_image, args=())
+    fetch_image_proc.start()
+
     descriptions = split_list(args, '--')
     machines = [get_machine(i + 1, path, desc)
                 for i, desc in enumerate(descriptions)]
@@ -373,6 +388,9 @@ def create_vm(conn, path, args):
 
     pool = Pool(len(machines))
     pool.map(create_single_vm, [(path, m) for m in machines])
+
+    image_fetch_request_queue.put((None, None))
+    fetch_image_proc.join()
 
 def ssh_vm(conn, path, args):
     cluster = get_current_cluster(conn, path)
