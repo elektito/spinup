@@ -425,28 +425,36 @@ def ssh_vm(conn, path, args):
 
     subprocess.call(cmd.split(' '))
 
+def destroy_single_vm(arg):
+    domain_id, machine = arg
+
+    conn = libvirt.open(LIBVIRT_URI)
+    domain = conn.lookupByID(domain_id)
+
+    xml = domain.XMLDesc()
+    tree = ET.fromstring(xml)
+    disk_file = tree.find('./devices/disk[@device="disk"]/source').attrib['file']
+    config_drive_file = tree.find('./devices/disk[@device="cdrom"]/source').attrib['file']
+
+    print('{}: Destroying VM...'.format(machine['name']))
+    domain.destroy()
+
+    print('{}: Undefining VM...'.format(machine['name']))
+    domain.undefine()
+
+    print('{}: Removing disk images...'.format(machine['name']))
+    os.unlink(disk_file)
+    os.unlink(config_drive_file)
+
+    print('{}: VM destroyed.'.format(machine['name']))
+
 def destroy_vm(conn, path, args):
     cluster = get_current_cluster(conn, path)
     if not cluster:
         raise RuntimeError('No cluster found in this directory.')
 
-    for domain, machine in cluster:
-        xml = domain.XMLDesc()
-        tree = ET.fromstring(xml)
-        disk_file = tree.find('./devices/disk[@device="disk"]/source').attrib['file']
-        config_drive_file = tree.find('./devices/disk[@device="cdrom"]/source').attrib['file']
-
-        print('{}: Destroying VM...'.format(machine['name']))
-        domain.destroy()
-
-        print('{}: Undefining VM...'.format(machine['name']))
-        domain.undefine()
-
-        print('{}: Removing disk images...'.format(machine['name']))
-        os.unlink(disk_file)
-        os.unlink(config_drive_file)
-
-        print('{}: VM destroyed.'.format(machine['name']))
+    pool = Pool(len(cluster))
+    pool.map(destroy_single_vm, [(d.ID(), m) for d, m in cluster])
 
 cmd_to_func = {
     'create': create_vm,
