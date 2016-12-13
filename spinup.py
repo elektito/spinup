@@ -173,8 +173,7 @@ def fetch_image():
         if os_type == 'linux':
             if os_variant == 'ubuntu':
                 filename = 'ubuntu-16.04-server-cloudimg-amd64-disk1.img'
-                #url = 'https://cloud-images.ubuntu.com/releases/releases/16.04/release/ubuntu-16.04-server-cloudimg-amd64-disk1.img'
-                url = 'http://localhost:8003/ubuntu-16.04-server-cloudimg-amd64-disk1.img.gz'
+                url = 'https://cloud-images.ubuntu.com/releases/releases/16.04/release/ubuntu-16.04-server-cloudimg-amd64-disk1.img'
             elif os_variant == 'centos':
                 filename = 'CentOS-7-x86_64-GenericCloud-1503.qcow2'
                 url = 'http://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1503.qcow2.xz'
