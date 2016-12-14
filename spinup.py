@@ -41,6 +41,12 @@ xml_template = '''
   <memory unit='MiB'>{memory}</memory>
   <vcpu>{cpus}</vcpu>
 
+  <features>
+    <acpi/>
+    <apic/>
+    <pae/>
+  </features>
+
   <devices>
     <os>
       <type>hvm</type>
@@ -425,10 +431,10 @@ def ssh_vm(conn, path, args):
     subprocess.call(cmd.split(' '))
 
 def destroy_single_vm(arg):
-    domain_id, machine = arg
+    domain_name, machine = arg
 
     conn = libvirt.open(LIBVIRT_URI)
-    domain = conn.lookupByID(domain_id)
+    domain = conn.lookupByName(domain_name)
 
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
@@ -436,7 +442,11 @@ def destroy_single_vm(arg):
     config_drive_file = tree.find('./devices/disk[@device="cdrom"]/source').attrib['file']
 
     print('{}: Destroying VM...'.format(machine['name']))
-    domain.destroy()
+    try:
+        domain.destroy()
+    except libvirt.libvirtError:
+        # this happens if the domain is shut-off.
+        pass
 
     print('{}: Undefining VM...'.format(machine['name']))
     domain.undefine()
@@ -453,12 +463,81 @@ def destroy_vm(conn, path, args):
         raise RuntimeError('No cluster found in this directory.')
 
     pool = Pool(len(cluster))
-    pool.map(destroy_single_vm, [(d.ID(), m) for d, m in cluster])
+    pool.map(destroy_single_vm, [(d.name(), m) for d, m in cluster])
+
+def shutdown_vm(conn, path, args):
+    cluster = get_current_cluster(conn, path)
+    if not cluster:
+        raise RuntimeError('No cluster found in this directory.')
+
+    if len(args) > 0:
+        name = args[0]
+        cluster = [(d, m) for d, m in cluster if m['name'] == name]
+        if len(cluster) == 0:
+            raise RuntimeError('No machine named "{}" found.'.format(name))
+
+    for domain, machine in cluster:
+        print('{}: Shutting VM down...'.format(machine['name']))
+        try:
+            domain.shutdown()
+        except libvirt.libvirtError:
+            # the domain is already shut off.
+            pass
+
+    while all(d.state()[0] != libvirt.VIR_DOMAIN_SHUTOFF for d, _ in cluster):
+        time.sleep(0.1)
+
+def start_vm(conn, path, args):
+    cluster = get_current_cluster(conn, path)
+    if not cluster:
+        raise RuntimeError('No cluster found in this directory.')
+
+    if len(args) > 0:
+        name = args[0]
+        cluster = [(d, m) for d, m in cluster if m['name'] == name]
+        if len(cluster) == 0:
+            raise RuntimeError('No machine named "{}" found.'.format(name))
+
+    for domain, machine in cluster:
+        print('{}: Starting VM...'.format(machine['name']))
+        domain.create()
+
+    while all(d.state()[0] != libvirt.VIR_DOMAIN_RUNNING for d, _ in cluster):
+        time.sleep(0.1)
+
+def status_vm(conn, path, args):
+    cluster = get_current_cluster(conn, path)
+    if not cluster:
+        raise RuntimeError('No cluster found in this directory.')
+
+    if len(args) > 0:
+        name = args[0]
+        cluster = [(d, m) for d, m in cluster if m['name'] == name]
+        if len(cluster) == 0:
+            raise RuntimeError('No machine named "{}" found.'.format(name))
+
+    # this corresponds to enum virDomainState
+    state_names = [
+        'so state',
+        'running',
+        'blocked',
+        'paused',
+        'shutdown',
+        'shutoff',
+        'crashed',
+        'pm-suspended',
+    ]
+
+    for domain, machine in cluster:
+        print('{}: {}'.format(machine['name'], state_names[domain.state()[0]]))
 
 cmd_to_func = {
     'create': create_vm,
     'ssh': ssh_vm,
     'destroy': destroy_vm,
+    'shutdown': shutdown_vm,
+    'start': start_vm,
+    'status': status_vm,
 }
 
 def process_args():
@@ -474,9 +553,8 @@ def process_args():
 
 def get_current_cluster(conn, source_dir):
     results = []
-    for domain_id in conn.listDomainsID():
+    for domain in conn.listAllDomains():
         machine = None
-        domain = conn.lookupByID(domain_id)
         metadata = domain.metadata(libvirt.VIR_DOMAIN_METADATA_ELEMENT,
                                    'http://spinup.io/instance')
         if metadata:
