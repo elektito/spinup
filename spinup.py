@@ -81,6 +81,10 @@ xml_template = '''
     <interface type='network'>
       <source network='default'/>
     </interface>
+    <filesystem type='mount' accessmode='mapped'>
+      <source dir='{path}'/>
+      <target dir='spinup'/>
+    </filesystem>
   </devices>
 
 </domain>
@@ -125,6 +129,22 @@ def create_cloud_config_drive(machine):
                 username=get_default_username(machine),
                 public_key=public_key,
                 hostname=machine['hostname'])
+        ],
+
+        'write_files': [
+            {
+                'path': '/etc/modules',
+                'content': b'loop\nvirtio\n9p\n9pnet\n9pnet_virtio\n'
+            }
+        ],
+
+        'runcmd': [
+            'cloud-init-per instance load-modules modprobe loop virtio 9p 9pnet 9pnet_virtio',
+            'cloud-init-per instance mount-all mount -a',
+        ],
+
+        'mounts': [
+            ['spinup', '/spinup', '9p', 'trans=virtio', '0', '0']
         ],
 
         'manage_etc_hosts': 'localhost',
