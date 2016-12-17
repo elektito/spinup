@@ -138,6 +138,25 @@ def create_cloud_config_drive(machine):
             }
         ],
 
+        'coreos': {
+            'units': [
+                {
+                    'name': 'spinup.mount',
+                    'command': 'start',
+                    'content': '''
+                    [Unit]
+                    Description=Mount spinup shared folder
+
+                    [Mount]
+                    What=spinup
+                    Where=/spinup
+                    Type=9p
+                    Options=trans=virtio
+                    '''
+                },
+            ],
+        },
+
         'runcmd': [
             'cloud-init-per instance load-modules modprobe loop virtio 9p 9pnet 9pnet_virtio',
             'cloud-init-per instance mount-all mount -a',
