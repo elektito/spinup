@@ -135,6 +135,19 @@ def create_cloud_config_drive(machine):
             {
                 'path': '/etc/modules',
                 'content': b'loop\nvirtio\n9p\n9pnet\n9pnet_virtio\n'
+            },
+            {
+                'path': '/etc/systemd/system/spinup.mount',
+                'content': '''
+                [Unit]
+                Description=Mount spinup shared folder
+
+                [Mount]
+                What=spinup
+                Where=/spinup
+                Type=9p
+                Options=trans=virtio
+                '''
             }
         ],
 
@@ -143,27 +156,13 @@ def create_cloud_config_drive(machine):
                 {
                     'name': 'spinup.mount',
                     'command': 'start',
-                    'content': '''
-                    [Unit]
-                    Description=Mount spinup shared folder
-
-                    [Mount]
-                    What=spinup
-                    Where=/spinup
-                    Type=9p
-                    Options=trans=virtio
-                    '''
                 },
             ],
         },
 
         'runcmd': [
-            'cloud-init-per instance load-modules modprobe loop virtio 9p 9pnet 9pnet_virtio',
-            'cloud-init-per instance mount-all mount -a',
-        ],
-
-        'mounts': [
-            ['spinup', '/spinup', '9p', 'trans=virtio', '0', '0']
+            'cloud-init-per instance enabler systemctl enable spinup.mount',
+            'cloud-init-per instance starter systemctl start spinup.mount',
         ],
 
         'manage_etc_hosts': 'localhost',
