@@ -10,6 +10,7 @@ import re
 import base64
 import pickle
 import yaml
+import random
 import libvirt
 import requests
 import yarl
@@ -17,6 +18,7 @@ import xml.etree.ElementTree as ET
 from tempfile import mkdtemp
 from collections import Counter
 from multiprocessing import Pool, Queue, Process
+from ipaddress import ip_interface, ip_address
 from tqdm import tqdm
 
 LIBVIRT_URI = 'qemu:///system'
@@ -78,9 +80,7 @@ xml_template = '''
       <target type='serial' port='0'/>
       <alias name='serial0'/>
     </console>
-    <interface type='network'>
-      <source network='default'/>
-    </interface>
+    {network_xml}
     <filesystem type='mount' accessmode='mapped'>
       <source dir='{path}'/>
       <target dir='spinup'/>
@@ -116,7 +116,12 @@ def create_cloud_config_drive(machine):
 
     meta_data = {
         'instance-id': machine['instance_id'],
-        'local-hostname': machine['hostname']
+        'local-hostname': machine['hostname'],
+
+        # this is essential, since the default network configuration
+        # in ubuntu insists on using dhcp on the first interface no
+        # matter what
+        'network-interfaces': '',
     }
 
     meta_data = yaml.dump(meta_data)
@@ -163,10 +168,46 @@ def create_cloud_config_drive(machine):
         'runcmd': [
             'cloud-init-per instance enabler systemctl enable spinup.mount',
             'cloud-init-per instance starter systemctl start spinup.mount',
+            'cloud-init-per instance daemon-reloader systemctl daemon-reload',
+            'cloud-init-per instance networkd-enabler systemctl enable systemd-networkd',
+            'cloud-init-per instance networking-disabler systemctl disble networking',
+            'cloud-init-per instance networking-stopper systemctl stop networking',
+            'cloud-init-per instance networkd-starter systemctl start --no-block systemd-networkd',
         ],
 
         'manage_etc_hosts': 'localhost',
     }
+
+    for i, network in enumerate(machine['networks']):
+        unit_file = '''
+        [Match]
+        MACAddress={mac}
+
+        [Network]
+        '''.format(index=i, **network)
+
+        if network['ip'] == 'dhcp':
+            unit_file += 'DHCP=yes\n'
+        else:
+            unit_file += 'Address={ip}\n'.format(ip=network['ip'])
+
+        if 'gateway' in network:
+            unit_file += 'Gateway={gateway}\n'.format(**network)
+
+        if 'dns' in network:
+            unit_file += 'DNS={}\n'.format(**network)
+
+        user_data['write_files'].append({
+            'name': 'network-{}.network'.format(i),
+            'path': '/etc/systemd/network/network-{}.network'.format(i),
+            'content': unit_file
+        })
+
+        user_data['coreos']['units'].append({
+            'name': 'network-{}.network'.format(i),
+            'enable': True,
+            'command': 'start',
+        })
 
     user_data = '#cloud-config\n\n' + yaml.dump(user_data)
 
@@ -273,12 +314,24 @@ def create_disk_image(base_image, machine):
                            err.decode() if err else out.decode())
     return image_filename
 
-def find_dhcp_lease(conn, mac):
-    for lease in conn.networkLookupByName('default').DHCPLeases():
-        if lease['mac'] == mac:
-            return lease
+def get_machine_ip_addrs(conn, domain, machine):
+    xml = domain.XMLDesc()
+    tree = ET.fromstring(xml)
+    mac = tree.find('./devices/interface[@type="network"]/mac').attrib['address']
 
-def process_mem_descriptor(desc, match, machine):
+    ips = []
+    for network in machine['networks']:
+        if network['ip'] == 'dhcp':
+            ips.extend(lease['ipaddr'] for lease
+                       in conn.networkLookupByName(network['network']).DHCPLeases()
+                       if lease['mac'] == mac)
+        else:
+            iface = ip_interface(network['ip'])
+            ips.append(iface.ip)
+
+    return ips
+
+def process_mem_descriptor(conn, desc, match, machine):
     value = int(match.group('value'))
     unit = match.group('unit')
 
@@ -296,7 +349,7 @@ def process_mem_descriptor(desc, match, machine):
 
     machine['memory'] = int(value / 2**20)
 
-def process_cpu_descriptor(desc, match, machine):
+def process_cpu_descriptor(conn, desc, match, machine):
     value = int(match.group('value'))
 
     if value == 0:
@@ -304,14 +357,50 @@ def process_cpu_descriptor(desc, match, machine):
 
     machine['cpus'] = value
 
-def process_os_descriptor(desc, match, machine):
+def process_os_descriptor(conn, desc, match, machine):
     machine['os_variant'] = match.group('variant')
 
-def process_name_descriptor(desc, match, machine):
+def process_name_descriptor(conn, desc, match, machine):
     machine['name'] = match.group('name')
 
 def process_disk_descriptor(desc, match, machine):
     machine['disk_size'] = match.group('size')
+
+def get_network_for_ip(conn, lookup_ip):
+    for net in conn.listAllNetworks():
+        xml = net.XMLDesc()
+        tree = ET.fromstring(xml)
+        ips = tree.findall('./ip')
+        for ip in ips:
+            addr = ip.attrib['address']
+            netmask = ip.attrib['netmask']
+            interface = ip_interface(addr + '/' + netmask)
+            if ip_interface(lookup_ip).ip in interface.network:
+                return net.name()
+
+def generate_random_mac():
+    return '{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}'.format(
+        random.randint(0, 0xfd) & 0xfe,
+        random.randint(0, 0xfe),
+        random.randint(0, 0xfe),
+        random.randint(0, 0xfe),
+        random.randint(0, 0xfe),
+        random.randint(0, 0xfe)
+    )
+
+def process_network_descriptor(conn, desc, match, machine):
+    ip = match.group('ip')
+    network = match.group('network')
+    if not network:
+        network = get_network_for_ip(conn, ip)
+    if not network:
+        network = 'default'
+
+    machine['networks'].append({
+        'ip': ip,
+        'network': network,
+        'mac': generate_random_mac(),
+    })
 
 descriptor_processors = [
     ('(?P<value>\\d+)(?P<unit>[KMGT])', process_mem_descriptor),
@@ -319,9 +408,11 @@ descriptor_processors = [
     ('(?P<variant>ubuntu|centos|coreos)', process_os_descriptor),
     (':(?P<name>\\w+)', process_name_descriptor),
     ('disk=(?P<size>\\d+[KMGT])', process_disk_descriptor),
+    ('((?P<network>(\\w|-)+):)?(?P<ip>\\d+\\.\\d+\\.\\d+\\.\\d+/\\d+|dhcp)',
+     process_network_descriptor),
 ]
 
-def get_machine(index, path, descriptors):
+def get_machine(conn, index, path, descriptors):
     global descriptor_processors
 
     # start with a default machine
@@ -340,6 +431,7 @@ def get_machine(index, path, descriptors):
         'os_variant': 'ubuntu',
         'memory': 1024,
         'cpus': 1,
+        'networks': [],
     }
 
     # compile regular expressions
@@ -350,7 +442,7 @@ def get_machine(index, path, descriptors):
         for regex, update_func in processors:
             match = regex.fullmatch(desc)
             if match:
-                update_func(desc, match, machine)
+                update_func(conn, desc, match, machine)
                 break
         else:
             raise RuntimeError('Invalid descriptor: ' + desc)
@@ -364,11 +456,21 @@ def create_single_vm(arg):
     machine['disk_image'] = create_disk_image(base_image, machine)
     machine['config_drive'] = create_cloud_config_drive(machine)
 
+    network_xml = ''
+    for network in machine['networks']:
+        network_xml += '''
+        <interface type='network'>
+          <mac address='{mac}' />
+          <source network='{network}' />
+        </interface>
+        '''.format(**network)
+
     pickled_machine = base64.b64encode(pickle.dumps(machine)).decode()
 
     xml = xml_template.format(
         path=path,
         pickled_machine=pickled_machine,
+        network_xml=network_xml,
         **machine)
 
     print('{}: Defining VM...'.format(machine['name']))
@@ -377,16 +479,16 @@ def create_single_vm(arg):
     print('{}: Launching VM...'.format(machine['name']))
     domain.create()
 
-    print('{}: Waiting for a DHCP lease to appear...'.format(machine['name']))
+    print('{}: Waiting to find VM IP address...'.format(machine['name']))
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
     mac = tree.find('./devices/interface[@type="network"]/mac').attrib['address']
 
-    lease = find_dhcp_lease(conn, mac)
-    while not lease:
-        lease = find_dhcp_lease(conn, mac)
+    ips = get_machine_ip_addrs(conn, domain, machine)
+    while not ips:
+        ips = get_machine_ip_addrs(conn, domain, machine)
         time.sleep(0.1)
-    ip = lease['ipaddr']
+    ip = str(ips[0])
     print('{}: Machine IP address: {}'.format(machine['name'], ip))
 
     print('{}: Waiting for SSH port to open...'.format(machine['name']))
@@ -395,6 +497,9 @@ def create_single_vm(arg):
         try:
             sock.connect((ip, 22))
         except ConnectionRefusedError:
+            pass
+        except OSError:
+            # (possibly?) no route to host
             pass
         else:
             sock.close()
@@ -417,7 +522,7 @@ def split_list(list, sep):
 
 def create_vm(conn, path, args):
     descriptions = split_list(args, '--')
-    machines = [get_machine(i + 1, path, desc)
+    machines = [get_machine(conn, i + 1, path, desc)
                 for i, desc in enumerate(descriptions)]
     duplicates = [item for item, count
                   in Counter([m['name'] for m in machines]).items()
@@ -428,6 +533,15 @@ def create_vm(conn, path, args):
     # set machine hostnames
     for machine in machines:
         machine['hostname'] = machine['name']
+
+        # If there are no network descriptors specified, add a single
+        # DHCP based one
+        if machine['networks'] == []:
+            machine['networks'].append({
+                'network': 'default',
+                'ip': 'dhcp',
+                'mac': generate_random_mac(),
+            })
 
     cluster = get_current_cluster(conn, path)
     if cluster:
@@ -463,8 +577,10 @@ def ssh_vm(conn, path, args):
     xml = domain.XMLDesc()
     tree = ET.fromstring(xml)
     mac = tree.find('./devices/interface[@type="network"]/mac').attrib['address']
-    lease = find_dhcp_lease(conn, mac)
-    ip = lease['ipaddr']
+    ips = get_machine_ip_addrs(conn, domain, machine)
+    if not ips:
+        raise RuntimeError('Can\'t find an IP address for the VM.')
+    ip = ips[0]
 
     username = get_default_username(machine)
 
