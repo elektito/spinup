@@ -602,7 +602,7 @@ def get_current_cluster(conn, source_dir):
                 pickled_machine = tree.find('./pickled-machine').text
                 machine = pickle.loads(base64.b64decode(pickled_machine))
 
-        results.append((domain, machine))
+                results.append((domain, machine))
 
     return results
 
