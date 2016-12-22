@@ -25,6 +25,16 @@ A few use cases:
 
         $ spinup :foo 2G 2cpus -- :bar 8G 4cpus
 
+ - Set disk size:
+
+        $ spinup disk=100G
+
+ - Add two network interfaces, one with a static IP address and one
+   configured for DHCP. For the static IP address to work, a libvirt
+   network must exist for the given IP range.
+
+        $ spinup 10.3.0.10/24 dhcp
+
  - Now ssh into `foo`:
 
         $ spinup ssh foo
