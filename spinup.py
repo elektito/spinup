@@ -363,7 +363,7 @@ def process_os_descriptor(conn, desc, match, machine):
 def process_name_descriptor(conn, desc, match, machine):
     machine['name'] = match.group('name')
 
-def process_disk_descriptor(desc, match, machine):
+def process_disk_descriptor(conn, desc, match, machine):
     machine['disk_size'] = match.group('size')
 
 def get_network_for_ip(conn, lookup_ip):
