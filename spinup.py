@@ -367,6 +367,9 @@ def process_disk_descriptor(conn, desc, match, machine):
     machine['disk_size'] = match.group('size')
 
 def get_network_for_ip(conn, lookup_ip):
+    if lookup_ip == 'dhcp':
+        return
+
     for net in conn.listAllNetworks():
         xml = net.XMLDesc()
         tree = ET.fromstring(xml)
