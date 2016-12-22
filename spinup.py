@@ -262,9 +262,12 @@ def get_image(os_type, os_variant):
 def create_disk_image(base_image, machine):
     print('{}: Creating disk image...'.format(machine['name']))
     image_filename = os.path.join(BASE_IMAGE_DIR, machine['instance_id'] + '-disk.img')
-    code, out, err = run_cmd('qemu-img create -f qcow2 -b {base_image} {image_filename}'.format(
+    cmd = 'qemu-img create -f qcow2 -b {base_image} {image_filename}'.format(
         base_image=base_image,
-        image_filename=image_filename))
+        image_filename=image_filename)
+    if machine.get('disk_size'):
+        cmd += ' ' + machine['disk_size']
+    code, out, err = run_cmd(cmd)
     if code != 0:
         raise RuntimeError('Error creating image: ' + \
                            err.decode() if err else out.decode())
@@ -307,11 +310,15 @@ def process_os_descriptor(desc, match, machine):
 def process_name_descriptor(desc, match, machine):
     machine['name'] = match.group('name')
 
+def process_disk_descriptor(desc, match, machine):
+    machine['disk_size'] = match.group('size')
+
 descriptor_processors = [
     ('(?P<value>\\d+)(?P<unit>[KMGT])', process_mem_descriptor),
     ('(?P<value>\\d+)cpus?', process_cpu_descriptor),
     ('(?P<variant>ubuntu|centos|coreos)', process_os_descriptor),
     (':(?P<name>\\w+)', process_name_descriptor),
+    ('disk=(?P<size>\\d+[KMGT])', process_disk_descriptor),
 ]
 
 def get_machine(index, path, descriptors):
