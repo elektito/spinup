@@ -47,3 +47,21 @@ A few use cases:
 might need to do some setting up before it will work correctly on your
 computer. The included `prepare.sh` script is supposed to help you do
 the one-off work you might need.
+
+Dependencies
+============
+
+On Ubuntu, the following packages are needed for installing and
+running `spinup`. For other distributions, the equivalent packages
+should be installed.
+
+ - `qemu-utils`: for the `qemu-img` command.
+ - `libvirt-dev`: dependency of the `libvirt-python` package installed
+   by `pip`.
+ - `libvirt-bin`
+ - `qemu-kvm`
+
+In order to make sure that `kvm` is being used, run the `kvm-ok`
+command. You might need to enable either the `kvm_amd` or `kvm_intel`
+kernel module. You might also need to enable hardware virtualization
+in BIOS.
